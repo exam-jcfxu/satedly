@@ -1,0 +1,70 @@
+from bs4 import BeautifulSoup as bs 
+import urllib2
+import MySQLdb
+from sqlalchemy import create_engine
+import Queue
+import pandas as pd 
+
+
+def get_title_links(html):
+	try:
+		soup = bs(html, fromEncoding='utf-8')
+		title = soup.title.string.encode('utf-8')
+		links = soup.find_all('a')
+		linksHandle1 = []
+		for l in links:
+			if 'href' in l.attrs and 'http' in l['href']:
+				linksHandle1.append(l['href'])
+	except Exception, e:
+		print "get_title_links", e
+		return None, None
+	return title, set(linksHandle1)
+
+
+def getLinks(targetURL):
+	try:
+		req = urllib2.Request(targetURL)
+		userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.13; rv:58.0) Gecko/20100101 Firefox/58.0"
+		req.add_header('User-Agent',userAgent)
+		resp = urllib2.urlopen(req, timeout=30).read()
+		html = resp.decode('utf-8','replace')
+		title, ilinks = get_title_links(html)
+	except Exception, e:
+		print "getLinks", e
+		return None, None, None 
+	return title, ilinks, html
+
+def saveDB(title, url, html):
+	try:
+		engine = create_engine("mysql://root:123456@127.0.0.1/sina_spider?charset=utf8mb4")
+		data = pd.DataFrame([{'title':title,'url':url,'content':html}])
+		data.to_sql("sina_spider", engine, if_exists="append", index=False)
+	except Exception, e:
+		print "saveDB error",e
+
+def addQueue(links, urlQueue, visitedURL):
+	if links is None:
+		return urlQueue, visitedURL
+	for i in links:
+		if i not in visitedURL and 'sina.com.cn' in i:
+			urlQueue.put(i)
+			visitedURL.add(i)
+	return urlQueue, visitedURL
+
+if __name__ == "__main__":
+	targetURL = "http://tech.sina.com.cn/"
+	title, allLinks, html = getLinks(targetURL)
+	saveDB(title, targetURL, html)
+	q = Queue.Queue()
+	visitedURL = set()
+	visitedURL.add(targetURL)
+	q, visitedURL = addQueue(allLinks, q, visitedURL)
+	while q.qsize() > 0 and q is not None:
+		targetURL = q.get()
+		print "queue size: ", q.qsize()
+		title, allLinks, html = getLinks(targetURL)
+		saveDB(title, targetURL, html)
+		q, visitedURL = addQueue(allLinks, q, visitedURL)
+
+
+
